@@ -101,6 +101,20 @@ class PostgresEventStoreTest extends AbstractPdoEventStoreTest
     /**
      * @test
      */
+    public function it_created_aggregate_with_id_containing_dot_char_while_using_aggreagete_stream_Strategy(): void
+    {
+        $this->setupEventStoreWith(new PostgresAggregateStreamStrategy());
+        $streamName = new StreamName('Prooph\Model\User-aggregate.id');
+
+        $stream = new Stream($streamName, new \ArrayIterator($this->getMultipleTestEvents()));
+
+        $this->eventStore->create($stream);
+
+    }
+
+    /**
+     * @test
+     */
     public function it_loads_correctly_using_single_stream_per_aggregate_type_strategy(): void
     {
         $this->setupEventStoreWith(new PostgresSingleStreamStrategy(new NoOpMessageConverter()), 5);
