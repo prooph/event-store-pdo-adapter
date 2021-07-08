@@ -710,6 +710,10 @@ SQL;
 
     private function createWhereClause(?MetadataMatcher $metadataMatcher): array
     {
+        if ($this->persistenceStrategy instanceof HasMetadataMatcher) {
+            return $this->persistenceStrategy->createWhereClause($metadataMatcher);
+        }
+
         $where = [];
         $values = [];
 

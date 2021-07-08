@@ -15,6 +15,9 @@ namespace Prooph\EventStore\Pdo\PersistenceStrategy;
 
 use Iterator;
 use Prooph\Common\Messaging\MessageConverter;
+use Prooph\EventStore\Metadata\FieldType;
+use Prooph\EventStore\Metadata\MetadataMatcher;
+use Prooph\EventStore\Metadata\Operator;
 use Prooph\EventStore\Pdo\DefaultMessageConverter;
 use Prooph\EventStore\Pdo\HasQueryHint;
 use Prooph\EventStore\Pdo\Util\Json;
@@ -22,6 +25,12 @@ use Prooph\EventStore\StreamName;
 
 final class MySqlSingleStreamStrategy implements MySqlPersistenceStrategy, HasQueryHint
 {
+    private static $metadataFieldsToColumnMap = [
+        '_aggregate_version' => 'aggregate_version',
+        '_aggregate_id' => 'aggregate_id',
+        '_aggregate_type' => 'aggregate_type',
+    ];
+
     /**
      * @var MessageConverter
      */
@@ -95,5 +104,81 @@ EOT;
     public function indexName(): string
     {
         return 'ix_query_aggregate';
+    }
+
+    public function createWhereClause(?MetadataMatcher $metadataMatcher): array
+    {
+        $where = [];
+        $values = [];
+
+        if (! $metadataMatcher) {
+            return [
+                $where,
+                $values,
+            ];
+        }
+
+        foreach ($metadataMatcher->data() as $key => $match) {
+            /** @var FieldType $fieldType */
+            $fieldType = $match['fieldType'];
+            $field = $match['field'];
+            /** @var Operator $operator */
+            $operator = $match['operator'];
+            $value = $match['value'];
+            $parameters = [];
+
+            if (\is_array($value)) {
+                foreach ($value as $k => $v) {
+                    $parameters[] = ':metadata_' . $key . '_' . $k;
+                }
+            } else {
+                $parameters = [':metadata_' . $key];
+            }
+
+            $parameterString = \implode(', ', $parameters);
+
+            $operatorStringEnd = '';
+
+            if ($operator->is(Operator::REGEX())) {
+                $operatorString = 'REGEXP';
+            } elseif ($operator->is(Operator::IN())) {
+                $operatorString = 'IN (';
+                $operatorStringEnd = ')';
+            } elseif ($operator->is(Operator::NOT_IN())) {
+                $operatorString = 'NOT IN (';
+                $operatorStringEnd = ')';
+            } else {
+                $operatorString = $operator->getValue();
+            }
+
+            if ($fieldType->is(FieldType::METADATA()) && !array_key_exists($field, self::$metadataFieldsToColumnMap)) {
+                if (\is_bool($value)) {
+                    $where[] = "metadata->\"$.$field\" $operatorString " . \var_export($value, true) . ' '. $operatorStringEnd;
+                    continue;
+                }
+
+                $where[] = "JSON_UNQUOTE(metadata->\"$.$field\") $operatorString $parameterString $operatorStringEnd";
+            } else {
+                if (array_key_exists($field, self::$metadataFieldsToColumnMap)) {
+                    $field = self::$metadataFieldsToColumnMap[$field];
+                }
+                if (\is_bool($value)) {
+                    $where[] = "$field $operatorString " . \var_export($value, true) . ' ' . $operatorStringEnd;
+                    continue;
+                }
+
+                $where[] = "$field $operatorString $parameterString $operatorStringEnd";
+            }
+
+            $value = (array) $value;
+            foreach ($value as $k => $v) {
+                $values[$parameters[$k]] = $v;
+            }
+        }
+
+        return [
+            $where,
+            $values,
+        ];
     }
 }
